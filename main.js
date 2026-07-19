@@ -26,6 +26,7 @@ document.getElementById('toggleCircle').addEventListener('change', e => circleEn
 document.getElementById('toggleParticles').addEventListener('change', e => particlesEnabled = e.target.checked);
 document.getElementById('toggleWave').addEventListener('change', e => waveEnabled = e.target.checked);
 document.getElementById('toggleBlobs').addEventListener('change', e => blobsEnabled = e.target.checked);
+document.getElementById('toggleSaber').addEventListener('change', e => saberEnabled = e.target.checked);
 
 function bindSlider(id, valId, formatter, onChange) {
   const el = document.getElementById(id);
@@ -42,7 +43,11 @@ bindSlider('hueStart', 'hueStartVal', v => Math.round(v) + '°', v => { hueStart
 bindSlider('hueRange', 'hueRangeVal', v => Math.round(v) + '°', v => { hueRange = v; recolorParticles(); });
 bindSlider('reactivity', 'reactivityVal', v => v.toFixed(1) + 'x', v => { reactivity = v; });
 bindSlider('particleSpread', 'particleSpreadVal', v => v.toFixed(1) + 'x', v => { particleSpread = v; });
+bindSlider('particlePosX', 'particlePosXVal', v => Math.round(v) + '%', v => { particlePosX = v / 100; });
+bindSlider('particlePosY', 'particlePosYVal', v => Math.round(v) + '%', v => { particlePosY = v / 100; });
 bindSlider('barHeight', 'barHeightVal', v => v.toFixed(1) + 'x', v => { barHeightScale = v; });
+bindSlider('circlePosX', 'circlePosXVal', v => Math.round(v) + '%', v => { circlePosX = v / 100; });
+bindSlider('circlePosY', 'circlePosYVal', v => Math.round(v) + '%', v => { circlePosY = v / 100; });
 bindSlider('gapDensity', 'gapVal', v => Math.round(v) + '%', v => { gapDensity = v / 100; });
 bindSlider('waveHeight', 'waveHeightVal', v => v.toFixed(1) + 'x', v => { waveHeightScale = v; });
 bindSlider('bgDim', 'bgDimVal', v => Math.round(v) + '%', v => { bgDim = v / 100; });
@@ -93,7 +98,15 @@ bindSlider('blobMinSize', 'blobMinSizeVal', v => Math.round(v) + 'px', v => { bl
 bindSlider('blobMaxSize', 'blobMaxSizeVal', v => Math.round(v) + 'px', v => { blobMaxSize = Math.max(v, blobMinSize); resizeBlobs(); });
 bindSlider('blobHueStart', 'blobHueStartVal', v => Math.round(v) + '°', v => { blobHueStart = v; recolorBlobs(); });
 bindSlider('blobHueRange', 'blobHueRangeVal', v => Math.round(v) + '°', v => { blobHueRange = v; recolorBlobs(); });
+bindSlider('blobGlow', 'blobGlowVal', v => v.toFixed(1) + 'x', v => { blobGlow = v; });
 document.getElementById('mirrorToggle').addEventListener('change', (e) => { mirrorEnabled = e.target.checked; });
+
+// ---------- Neon saber ring controls ----------
+bindSlider('saberHue', 'saberHueVal', v => Math.round(v) + '°', v => { saberHue = v; });
+bindSlider('saberGlow', 'saberGlowVal', v => v.toFixed(1) + 'x', v => { saberGlow = v; });
+bindSlider('saberRadius', 'saberRadiusVal', v => Math.round(v) + '%', v => { saberRadius = v / 100; });
+bindSlider('saberPosX', 'saberPosXVal', v => Math.round(v) + '%', v => { saberPosX = v / 100; });
+bindSlider('saberPosY', 'saberPosYVal', v => Math.round(v) + '%', v => { saberPosY = v / 100; });
 
 // ---------- Beat reaction: frequency-band source + custom range + sensitivity ----------
 const bandSourceSel = document.getElementById('bandSource');

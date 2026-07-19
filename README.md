@@ -14,15 +14,17 @@ Canvas 2D, and the Web Audio API. No build step, no dependencies — just open
     virtual audio cable) — requires HTTPS or `localhost`
 
 - **Visual presets** (each toggleable independently in Settings)
-  - Circular spectrum ring (mirror/symmetry, bar height, and "gap" density
-    all adjustable)
+  - Circular spectrum ring (mirror/symmetry, bar height, "gap" density, and
+    on-screen position all adjustable)
   - Center-burst particles (slow ramp-up on playback start, count, color,
-    beat reactivity, and how far they spread all adjustable — each beat
-    fires them outward)
+    beat reactivity, how far they spread, and their emit position all
+    adjustable — each beat fires them outward)
   - Floating waveform ribbon (layered glowing wave, height adjustable)
-  - Glowing floating blobs (count, min/max size, color range; additively
-    blended so overlaps brighten instead of leaving dark rings, and they
-    veer + lunge on every beat)
+  - Glowing floating blobs (count, min/max size, color range, and glow
+    amount adjustable; additively blended so overlaps brighten instead of
+    leaving dark rings, and they veer + lunge on every beat)
+  - Neon saber ring — a glowing soundwave circle with saber-style bloom
+    (adjustable color/hue, glow intensity, radius, and position)
 
 - **Beat reaction** (shared by particles + blobs)
   - Choose which frequency band drives the reaction: bass (kick/sub),
@@ -36,6 +38,11 @@ Canvas 2D, and the Web Audio API. No build step, no dependencies — just open
   - Upload a custom image or video as the backdrop (auto "cover" fit,
     adjustable dim overlay)
 
+- **Timeline scrub**
+  - For an uploaded music file, a seek bar + `m:ss / m:ss` time readout
+    appears in the bottom panel so you can jump to any part of the track
+    (hidden for the demo track and live device input)
+
 - **UI**
   - Settings gear (top-right) opens/closes a panel with all the sliders/
     toggles above
@@ -47,15 +54,23 @@ Canvas 2D, and the Web Audio API. No build step, no dependencies — just open
 ## Project structure
 
 ```
-index.html   — everything: markup, styles, and script (self-contained)
+index.html   — markup only; links the CSS and scripts below
+style.css    — all styling
+i18n.js      — translations dictionary + t()/applyStaticTranslations() and
+               the language switcher / track-name / button-label rendering
+audio.js     — analyser setup, file playback, timeline scrub, demo track
+               scheduler, mic/device handling
+visuals.js   — Particle/Blob classes, beat detection, circular spectrum,
+               waveform ribbon, neon saber ring, and the render loop
+main.js      — glue: keyboard shortcuts, settings panel, slider/checkbox
+               wiring, background upload, and kicking off the render loop
 ```
 
-Currently the whole app lives in one file for simplicity. If it keeps
-growing, natural next steps are to split out:
-- `style.css`
-- `i18n.js` (the `translations` dictionary + `t()`/`applyStaticTranslations()`)
-- `audio.js` (analyser setup, demo track scheduler, mic/device handling)
-- `visuals.js` (Particle/Blob classes, spectrum + waveform drawing, render loop)
+The four scripts are plain (non-module) `<script>` tags sharing one global
+scope, so **load order matters** — `i18n.js` → `audio.js` → `visuals.js` →
+`main.js`. They carry a `?v=N` query (see the tags at the bottom of
+`index.html`); bump `N` whenever you edit a script so browsers don't serve a
+stale cached copy.
 
 ## Running locally
 

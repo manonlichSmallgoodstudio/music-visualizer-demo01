@@ -52,6 +52,15 @@ body.ui-hidden .fadeable {
 }
 #fileInput { display: none; }
 
+#seekBar {
+  width: 200px; accent-color: #ff5ccb; cursor: pointer;
+  vertical-align: middle;
+}
+#timeLabel {
+  font-size: 12px; color: #9aa0d0; font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* ---- Settings gear + panel ---- */
 #settingsToggleBtn {
   position: fixed; top: 20px; right: 20px; z-index: 20;

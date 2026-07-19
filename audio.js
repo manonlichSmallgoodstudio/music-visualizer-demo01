@@ -5,6 +5,44 @@ playBtnRef = playBtn;
 const trackName = document.getElementById('trackName');
 trackNameRef = trackName;
 
+// ---------- Timeline scrub (only meaningful for uploaded files) ----------
+const seekBar = document.getElementById('seekBar');
+const timeLabel = document.getElementById('timeLabel');
+let seeking = false;   // true while the user drags, so timeupdate doesn't fight them
+
+function formatTime(sec) {
+  if (!isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+function showSeek(show) {
+  seekBar.style.display = show ? '' : 'none';
+  timeLabel.style.display = show ? '' : 'none';
+}
+function updateSeekUI() {
+  if (!audioEl || !isFinite(audioEl.duration) || audioEl.duration === 0) {
+    seekBar.value = '0';
+    timeLabel.textContent = '0:00 / 0:00';
+    return;
+  }
+  seekBar.value = String(Math.round((audioEl.currentTime / audioEl.duration) * 1000));
+  timeLabel.textContent = formatTime(audioEl.currentTime) + ' / ' + formatTime(audioEl.duration);
+}
+seekBar.addEventListener('input', () => {
+  seeking = true;
+  if (audioEl && isFinite(audioEl.duration)) {
+    const target = (parseInt(seekBar.value, 10) / 1000) * audioEl.duration;
+    timeLabel.textContent = formatTime(target) + ' / ' + formatTime(audioEl.duration);
+  }
+});
+seekBar.addEventListener('change', () => {
+  if (audioEl && isFinite(audioEl.duration)) {
+    audioEl.currentTime = (parseInt(seekBar.value, 10) / 1000) * audioEl.duration;
+  }
+  seeking = false;
+});
+
 let audioCtx, analyser, source, audioEl;
 let freqData, timeData;
 const FFT_SIZE = 512;
@@ -57,6 +95,7 @@ async function connectDevice(deviceId) {
     stopDemo();
     if (audioEl && !audioEl.paused) { audioEl.pause(); renderPlayBtnText(); }
     stopMic();
+    showSeek(false);
     const constraints = deviceId ? { audio: { deviceId: { exact: deviceId } } } : { audio: true };
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -92,10 +131,14 @@ fileInput.addEventListener('change', (e) => {
     audioEl.addEventListener('play', markPlaybackStart);
     audioEl.addEventListener('pause', markPlaybackStop);
     audioEl.addEventListener('ended', markPlaybackStop);
+    audioEl.addEventListener('loadedmetadata', updateSeekUI);
+    audioEl.addEventListener('timeupdate', () => { if (!seeking) updateSeekUI(); });
   }
   audioEl.src = url;
   playBtn.disabled = false;
   renderPlayBtnText();
+  showSeek(true);
+  updateSeekUI();
 
   ensureAudioCtx();
   if (!source) {
@@ -108,6 +151,7 @@ playBtn.addEventListener('click', async () => {
   if (!audioEl) return;
   stopDemo();
   stopMic();
+  showSeek(true);
   if (audioCtx.state === 'suspended') await audioCtx.resume();
   if (audioEl.paused) {
     audioEl.play();
@@ -291,6 +335,7 @@ async function startDemo() {
   if (audioCtx.state === 'suspended') await audioCtx.resume();
   if (audioEl && !audioEl.paused) { audioEl.pause(); renderPlayBtnText(); }
   stopMic();
+  showSeek(false);
 
   demoMasterGain = audioCtx.createGain();
   demoMasterGain.gain.value = 0.9;

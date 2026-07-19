@@ -28,6 +28,18 @@ let blobHueStart = 300;
 let blobHueRange = 80;
 let blobMinSize = 12;
 let blobMaxSize = 34;
+let blobGlow = 1.0;       // scales the soft halo around each blob
+
+// ---------- Positions (fractions of the viewport, 0..1) ----------
+let circlePosX = 0.5, circlePosY = 0.5;     // circular spectrum ring + its center glow
+let particlePosX = 0.5, particlePosY = 0.5; // where center-burst particles emit from
+let particleOX = 0, particleOY = 0;         // resolved pixel origin, set each frame
+
+// ---------- Neon saber ring preset ----------
+let saberHue = 180;        // turquoise like the reference by default
+let saberGlow = 1.0;       // glow / bloom intensity
+let saberRadius = 0.18;    // fraction of min(W, H)
+let saberPosX = 0.5, saberPosY = 0.5;
 
 // ---------- Beat / frequency-band reactivity ----------
 // The visuals react to one slice of the spectrum. Presets name the slice after
@@ -49,6 +61,7 @@ let circleEnabled = true;
 let particlesEnabled = true;
 let waveEnabled = true;
 let blobsEnabled = true;
+let saberEnabled = true;
 
 function clearBackground() {
   if (bgMediaType === 'video' && bgMedia) {
@@ -90,8 +103,8 @@ class Particle {
     if (this.life <= 0 || this.radius > Math.max(W, H) * 0.75 * particleSpread) this.reset();
   }
   draw() {
-    const x = CX + Math.cos(this.angle) * this.radius;
-    const y = CY + Math.sin(this.angle) * this.radius;
+    const x = particleOX + Math.cos(this.angle) * this.radius;
+    const y = particleOY + Math.sin(this.angle) * this.radius;
     ctx.beginPath();
     ctx.arc(x, y, this.size * (1 + this.impulse * 0.6), 0, Math.PI * 2);
     ctx.fillStyle = `hsla(${this.hue}, 90%, 65%, ${Math.max(this.life, 0)})`;
@@ -148,7 +161,7 @@ class Blob {
   }
   draw() {
     const r = this.baseRadius * (1 + this.pulse * 0.9);
-    const R = r * 2.6;
+    const R = r * 2.6 * blobGlow;   // halo size scales with the glow slider
     const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, R);
     // Additive blending (set by drawBlobs) means alphas stack, so these stay low
     // and the outer stop fades to a fully transparent version of the SAME hue —
@@ -302,6 +315,59 @@ function drawWaveFlow(elapsed) {
   ctx.restore();
 }
 
+// ---------- Neon saber ring preset (glowing soundwave circle, saber bloom) ----------
+const SABER_LAYERS = 3;
+const SABER_POINTS = 170;
+
+function drawSaberRing(elapsed) {
+  const ox = W * saberPosX, oy = H * saberPosY;
+  const baseR = Math.min(W, H) * saberRadius * (1 + beatFlash * 0.10);
+  ctx.save();
+  ctx.translate(ox, oy);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  for (let layer = 0; layer < SABER_LAYERS; layer++) {
+    const layerPhase = elapsed * 0.0004 + layer * 1.7;
+    const layerAmp = 1 - layer * 0.16;
+
+    ctx.beginPath();
+    for (let i = 0; i <= SABER_POINTS; i++) {
+      const frac = i / SABER_POINTS;
+      const ang = frac * Math.PI * 2;
+      const value = sampleFreqAt(frac);
+      // organic multi-harmonic wobble so the ring breathes like the reference,
+      // riding on top of the actual spectrum displacement
+      const wob = Math.sin(ang * 3 + layerPhase) * 0.5
+                + Math.sin(ang * 5 - layerPhase * 1.3) * 0.3
+                + Math.sin(ang * 8 + layerPhase * 0.6) * 0.2;
+      const disp = (value * 0.85 + wob * 0.14) * baseR * 0.55 * layerAmp;
+      const r = baseR + disp;
+      const x = Math.cos(ang) * r;
+      const y = Math.sin(ang) * r;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+
+    // saber bloom: wide soft passes underneath, thin bright core on top
+    const g = saberGlow;
+    ctx.strokeStyle = `hsla(${saberHue}, 100%, 55%, ${0.05 * g})`;
+    ctx.lineWidth = 26 * g;
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${saberHue}, 100%, 60%, ${0.11 * g})`;
+    ctx.lineWidth = 12 * g;
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${saberHue}, 100%, 72%, 0.45)`;
+    ctx.lineWidth = 3.2;
+    ctx.stroke();
+    ctx.strokeStyle = `hsla(${saberHue}, 100%, 94%, 0.9)`;   // white-hot core line
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // ---------- Render loop ----------
 let beatFlash = 0;
 let beatImpulse = 0;
@@ -341,10 +407,11 @@ function draw() {
   }
 
   // ---- Circular spectrum ----
+  const circleOX = W * circlePosX, circleOY = H * circlePosY;
   if (circleEnabled) {
     const baseRadius = Math.min(W, H) * 0.16 * (1 + beatFlash * 0.06);
     ctx.save();
-    ctx.translate(CX, CY);
+    ctx.translate(circleOX, circleOY);
 
     if (mirrorEnabled) {
       for (let i = 0; i < HALF_BAR_COUNT; i++) {
@@ -374,17 +441,20 @@ function draw() {
 
     // ---- Center glow (part of the circular spectrum preset) ----
     const glowR = baseRadius * (0.9 + beatFlash * 0.5);
-    const grad = ctx.createRadialGradient(CX, CY, 0, CX, CY, glowR);
+    const grad = ctx.createRadialGradient(circleOX, circleOY, 0, circleOX, circleOY, glowR);
     grad.addColorStop(0, `rgba(180, 130, 255, ${0.25 + beatFlash * 0.35})`);
     grad.addColorStop(1, 'rgba(180, 130, 255, 0)');
     ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.arc(CX, CY, glowR, 0, Math.PI * 2);
+    ctx.arc(circleOX, circleOY, glowR, 0, Math.PI * 2);
     ctx.fill();
   }
 
   // ---- Floating waveform ribbon ----
   if (waveEnabled) drawWaveFlow(now);
+
+  // ---- Neon saber ring ----
+  if (saberEnabled) drawSaberRing(now);
 
   // ---- Particles & blobs: slow start, then build up clearly with the music ----
   const rampProgress = playbackStartTime ? Math.min((now - playbackStartTime) / RAMP_DURATION, 1) : 0;
@@ -393,6 +463,8 @@ function draw() {
   const impulse = beatImpulse * reactivity * rampProgress;
 
   if (particlesEnabled) {
+    particleOX = W * particlePosX;
+    particleOY = H * particlePosY;
     particles.forEach(p => { p.update(energyBoost, speedMultiplier, impulse); p.draw(); });
   }
   if (blobsEnabled) {
