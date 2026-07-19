@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>Circular Audio Visualizer + Beat Particles</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #05050a;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    overflow: hidden;
+  }
+  #canvas { display: block; }
+
+  .fadeable { transition: opacity 0.25s ease, transform 0.25s ease; }
+  body.ui-hidden .fadeable {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(6px);
+  }
+
+  #hint {
+    position: fixed; top: 22px; left: 50%; transform: translateX(-50%);
+    color: #6d74a8; font-size: 12px; letter-spacing: 0.5px;
+    z-index: 10; text-align: center;
+  }
+  #hint kbd {
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(150,160,255,0.25);
+    border-radius: 4px; padding: 1px 6px; font-size: 11px; color: #cfd3ff;
+  }
+
+  #panel {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px;
+    background: rgba(15, 15, 25, 0.55);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(150, 160, 255, 0.15);
+    border-radius: 40px;
+    padding: 10px 18px;
+    color: #cfd3ff;
+    z-index: 10;
+  }
+  #panel button {
+    background: linear-gradient(135deg, #7b5cff, #ff5ccb);
+    border: none; color: white; font-weight: 600;
+    padding: 8px 16px; border-radius: 30px; cursor: pointer;
+    font-size: 13px; letter-spacing: 0.3px;
+  }
+  #panel button:disabled { opacity: 0.4; cursor: default; }
+  #panel label {
+    font-size: 12px; color: #9aa0d0; cursor: pointer;
+    background: rgba(255,255,255,0.06);
+    padding: 8px 14px; border-radius: 30px;
+  }
+  #trackName {
+    font-size: 12px; color: #8890c8; max-width: 160px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #fileInput { display: none; }
+
+  /* ---- Settings gear + panel ---- */
+  #settingsToggleBtn {
+    position: fixed; top: 20px; right: 20px; z-index: 20;
+    width: 38px; height: 38px; border-radius: 50%;
+    background: rgba(20, 20, 32, 0.55);
+    border: 1px solid rgba(150, 160, 255, 0.2);
+    backdrop-filter: blur(8px);
+    color: #cfd3ff; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+
+  #settingsPanel {
+    position: fixed; top: 68px; right: 20px; z-index: 20;
+    width: 260px;
+    background: rgba(14, 14, 24, 0.72);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(150, 160, 255, 0.18);
+    border-radius: 16px;
+    padding: 16px 16px 10px;
+    color: #cfd3ff;
+    font-size: 12px;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  #settingsPanel.collapsed { display: none; }
+
+  #settingsPanel h4 {
+    margin: 12px 0 6px; font-size: 11px; letter-spacing: 0.6px;
+    text-transform: uppercase; color: #9aa0d0; font-weight: 600;
+  }
+  #settingsPanel h4:first-child { margin-top: 0; }
+
+  .row { margin-bottom: 10px; }
+  .row label {
+    display: flex; justify-content: space-between; margin-bottom: 4px;
+    color: #b6bce8;
+  }
+  .row .val { color: #ff9ce9; font-variant-numeric: tabular-nums; }
+  .row input[type=range] {
+    width: 100%; accent-color: #a06bff;
+  }
+  .row.checkbox { display: flex; align-items: center; gap: 8px; }
+  .row.checkbox label { margin: 0; flex: 1; cursor: pointer; }
+  .row.checkbox input { accent-color: #a06bff; width: 16px; height: 16px; cursor: pointer; }
+
+  #settingsPanel::-webkit-scrollbar { width: 6px; }
+  #settingsPanel::-webkit-scrollbar-thumb { background: rgba(150,160,255,0.25); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<div id="hint" class="fadeable">เลือกไฟล์เพลง หรือกด "เล่นเพลงตัวอย่าง" &nbsp;·&nbsp; <kbd>H</kbd> ซ่อน/แสดง UI &nbsp;·&nbsp; <kbd>F</kbd> เต็มจอ</div>
+<canvas id="canvas"></canvas>
+
+<button id="settingsToggleBtn" class="fadeable" title="ตั้งค่า">⚙</button>
+
+<div id="settingsPanel" class="fadeable collapsed">
+  <h4>แสดงกราฟิก</h4>
+  <div class="row checkbox">
+    <input type="checkbox" id="toggleCircle" checked>
+    <label for="toggleCircle">วงกลมสเปกตรัม</label>
+  </div>
+  <div class="row checkbox">
+    <input type="checkbox" id="toggleParticles" checked>
+    <label for="toggleParticles">Particle จากศูนย์กลาง</label>
+  </div>
+  <div class="row checkbox">
+    <input type="checkbox" id="toggleWave" checked>
+    <label for="toggleWave">คลื่นลอย (waveform ribbon)</label>
+  </div>
+  <div class="row checkbox">
+    <input type="checkbox" id="toggleBlobs" checked>
+    <label for="toggleBlobs">ก้อนลอยเรืองแสง</label>
+  </div>
+
+  <h4>Particles</h4>
+  <div class="row">
+    <label>จำนวน particle <span class="val" id="particleCountVal">260</span></label>
+    <input type="range" id="particleCount" min="20" max="600" step="10" value="260">
+  </div>
+  <div class="row">
+    <label>สีเริ่มต้น (Hue) <span class="val" id="hueStartVal">260°</span></label>
+    <input type="range" id="hueStart" min="0" max="360" step="5" value="260">
+  </div>
+  <div class="row">
+    <label>ช่วงสี (Hue range) <span class="val" id="hueRangeVal">100°</span></label>
+    <input type="range" id="hueRange" min="0" max="360" step="5" value="100">
+  </div>
+  <div class="row">
+    <label>ความไวต่อจังหวะ <span class="val" id="reactivityVal">1.0x</span></label>
+    <input type="range" id="reactivity" min="0.3" max="3" step="0.1" value="1.0">
+  </div>
+
+  <h4>วงกลมสเปกตรัม</h4>
+  <div class="row">
+    <label>ความสูงเส้น <span class="val" id="barHeightVal">1.0x</span></label>
+    <input type="range" id="barHeight" min="0.3" max="2.5" step="0.1" value="1.0">
+  </div>
+  <div class="row checkbox">
+    <input type="checkbox" id="mirrorToggle" checked>
+    <label for="mirrorToggle">Mirror ซ้าย/ขวา (symmetry)</label>
+  </div>
+  <div class="row">
+    <label>ช่องว่าง (บางเส้นไม่ขึ้น) <span class="val" id="gapVal">35%</span></label>
+    <input type="range" id="gapDensity" min="0" max="90" step="5" value="35">
+  </div>
+
+  <h4>คลื่นลอย</h4>
+  <div class="row">
+    <label>ความสูงคลื่น <span class="val" id="waveHeightVal">1.0x</span></label>
+    <input type="range" id="waveHeight" min="0.3" max="2.5" step="0.1" value="1.0">
+  </div>
+
+  <h4>ก้อนลอยเรืองแสง</h4>
+  <div class="row">
+    <label>จำนวนก้อน <span class="val" id="blobCountVal">22</span></label>
+    <input type="range" id="blobCount" min="4" max="60" step="1" value="22">
+  </div>
+  <div class="row">
+    <label>สีเริ่มต้น (Hue) <span class="val" id="blobHueStartVal">300°</span></label>
+    <input type="range" id="blobHueStart" min="0" max="360" step="5" value="300">
+  </div>
+  <div class="row">
+    <label>ช่วงสี (Hue range) <span class="val" id="blobHueRangeVal">80°</span></label>
+    <input type="range" id="blobHueRange" min="0" max="360" step="5" value="80">
+  </div>
+</div>
+
+<div id="panel" class="fadeable">
+  <label for="fileInput">เลือกเพลง</label>
+  <input type="file" id="fileInput" accept="audio/*">
+  <button id="demoBtn">▶ เล่นเพลงตัวอย่าง</button>
+  <button id="playBtn" disabled>▶ เล่น</button>
+  <span id="trackName">ยังไม่ได้เลือกไฟล์</span>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W, H, CX, CY;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  CX = W / 2; CY = H / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---------- Keyboard shortcuts: H = hide/show UI, F = fullscreen ----------
+window.addEventListener('keydown', (e) => {
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (tag === 'INPUT' && document.activeElement.type !== 'range' && document.activeElement.type !== 'checkbox') return;
+
+  if (e.key.toLowerCase() === 'h') {
+    document.body.classList.toggle('ui-hidden');
+  } else if (e.key.toLowerCase() === 'f') {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
+});
+
+// ---------- Settings panel ----------
+const settingsToggleBtn = document.getElementById('settingsToggleBtn');
+const settingsPanel = document.getElementById('settingsPanel');
+settingsToggleBtn.addEventListener('click', () => {
+  settingsPanel.classList.toggle('collapsed');
+});
+
+// ---------- Preset visibility toggles ----------
+let circleEnabled = true;
+let particlesEnabled = true;
+let waveEnabled = true;
+let blobsEnabled = true;
+document.getElementById('toggleCircle').addEventListener('change', e => circleEnabled = e.target.checked);
+document.getElementById('toggleParticles').addEventListener('change', e => particlesEnabled = e.target.checked);
+document.getElementById('toggleWave').addEventListener('change', e => waveEnabled = e.target.checked);
+document.getElementById('toggleBlobs').addEventListener('change', e => blobsEnabled = e.target.checked);
+
+// live-adjustable parameters (defaults)
+let PARTICLE_COUNT = 260;
+let hueStart = 260;
+let hueRange = 100;
+let reactivity = 1.0;
+let barHeightScale = 1.0;
+let mirrorEnabled = true;
+let gapDensity = 0.35;
+let waveHeightScale = 1.0;
+let BLOB_COUNT = 22;
+let blobHueStart = 300;
+let blobHueRange = 80;
+
+function bindSlider(id, valId, formatter, onChange) {
+  const el = document.getElementById(id);
+  const valEl = document.getElementById(valId);
+  el.addEventListener('input', () => {
+    const v = parseFloat(el.value);
+    valEl.textContent = formatter(v);
+    onChange(v);
+  });
+}
+
+bindSlider('particleCount', 'particleCountVal', v => Math.round(v), v => setParticleCount(Math.round(v)));
+bindSlider('hueStart', 'hueStartVal', v => Math.round(v) + '°', v => { hueStart = v; recolorParticles(); });
+bindSlider('hueRange', 'hueRangeVal', v => Math.round(v) + '°', v => { hueRange = v; recolorParticles(); });
+bindSlider('reactivity', 'reactivityVal', v => v.toFixed(1) + 'x', v => { reactivity = v; });
+bindSlider('barHeight', 'barHeightVal', v => v.toFixed(1) + 'x', v => { barHeightScale = v; });
+bindSlider('gapDensity', 'gapVal', v => Math.round(v) + '%', v => { gapDensity = v / 100; });
+bindSlider('waveHeight', 'waveHeightVal', v => v.toFixed(1) + 'x', v => { waveHeightScale = v; });
+bindSlider('blobCount', 'blobCountVal', v => Math.round(v), v => setBlobCount(Math.round(v)));
+bindSlider('blobHueStart', 'blobHueStartVal', v => Math.round(v) + '°', v => { blobHueStart = v; recolorBlobs(); });
+bindSlider('blobHueRange', 'blobHueRangeVal', v => Math.round(v) + '°', v => { blobHueRange = v; recolorBlobs(); });
+document.getElementById('mirrorToggle').addEventListener('change', (e) => { mirrorEnabled = e.target.checked; });
+
+// ---------- Audio setup ----------
+const fileInput = document.getElementById('fileInput');
+const playBtn = document.getElementById('playBtn');
+const trackName = document.getElementById('trackName');
+
+let audioCtx, analyser, source, audioEl;
+let freqData, timeData;
+const FFT_SIZE = 512;
+
+// playback "ramp" so particles/blobs start slow and build up over the first few seconds
+let playbackStartTime = null;
+function markPlaybackStart() { playbackStartTime = performance.now(); }
+function markPlaybackStop() { playbackStartTime = null; }
+
+fileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  trackName.textContent = file.name;
+  const url = URL.createObjectURL(file);
+
+  if (!audioEl) {
+    audioEl = new Audio();
+    audioEl.crossOrigin = 'anonymous';
+    audioEl.addEventListener('play', markPlaybackStart);
+    audioEl.addEventListener('pause', markPlaybackStop);
+    audioEl.addEventListener('ended', markPlaybackStop);
+  }
+  audioEl.src = url;
+  playBtn.disabled = false;
+  playBtn.textContent = '▶ เล่น';
+
+  ensureAudioCtx();
+  if (!source) {
+    source = audioCtx.createMediaElementSource(audioEl);
+    source.connect(analyser);
+  }
+});
+
+playBtn.addEventListener('click', async () => {
+  if (!audioEl) return;
+  stopDemo();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  if (audioEl.paused) {
+    audioEl.play();
+    playBtn.textContent = '⏸ หยุด';
+  } else {
+    audioEl.pause();
+    playBtn.textContent = '▶ เล่น';
+  }
+});
+
+// ---------- Synthesized demo track (no external audio file needed) ----------
+const demoBtn = document.getElementById('demoBtn');
+let demoPlaying = false;
+let demoMasterGain, demoTimerID, demoNextStepTime;
+
+// Three alternating sections: slow -> fast -> breakdown (quiet/medium) -> repeat
+const SECTIONS = [
+  {
+    name: 'slow', bpm: 72, bars: 4, volume: 0.85,
+    kick:  [1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0],
+    snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+    hat:   [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
+    bass:  [0,null,null,null, 3,null,null,null, -2,null,null,null, 1,null,null,null],
+    chordSteps: [0, 8],
+  },
+  {
+    name: 'fast', bpm: 160, bars: 4, volume: 1.0,
+    kick:  [1,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,1,0],
+    snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,1],
+    hat:   [0,1,1,1, 0,1,1,1, 0,1,1,1, 0,1,1,1],
+    bass:  [0,null,0,null, 3,null,3,null, -2,null,-2,null, 1,null,1,null],
+    chordSteps: [0, 4, 8, 12],
+  },
+  {
+    name: 'breakdown', bpm: 100, bars: 4, volume: 0.45,
+    kick:  [1,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    snare: [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    hat:   [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0],
+    bass:  [0,null,null,null, null,null,null,null, -2,null,null,null, null,null,null,null],
+    chordSteps: [0],
+  },
+];
+const CHORD_NOTES = [0, 3, 7];
+const LOOKAHEAD = 0.1; // seconds to schedule ahead
+
+function ensureAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!analyser) {
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = FFT_SIZE;
+    analyser.smoothingTimeConstant = 0.8;
+    freqData = new Uint8Array(analyser.frequencyBinCount);
+    timeData = new Uint8Array(analyser.fftSize);
+    analyser.connect(audioCtx.destination);
+  }
+}
+
+function freqFromSemitone(base, semitone) {
+  return base * Math.pow(2, semitone / 12);
+}
+
+function scheduleKick(time, vol) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(150, time);
+  osc.frequency.exponentialRampToValueAtTime(45, time + 0.12);
+  gain.gain.setValueAtTime(0.9 * vol, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.22);
+  osc.connect(gain).connect(demoMasterGain);
+  osc.start(time);
+  osc.stop(time + 0.25);
+}
+
+function scheduleHat(time, vol) {
+  const bufferSize = audioCtx.sampleRate * 0.05;
+  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = buffer;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'highpass';
+  filter.frequency.value = 7000;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.25 * vol, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+  noise.connect(filter).connect(gain).connect(demoMasterGain);
+  noise.start(time);
+  noise.stop(time + 0.06);
+}
+
+function scheduleSnare(time, vol) {
+  const bufferSize = audioCtx.sampleRate * 0.15;
+  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = buffer;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.value = 1800;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.5 * vol, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
+  noise.connect(filter).connect(gain).connect(demoMasterGain);
+  noise.start(time);
+  noise.stop(time + 0.16);
+}
+
+function scheduleBass(time, semitone, sixteenth, vol) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(freqFromSemitone(110, semitone), time);
+  gain.gain.setValueAtTime(0.001, time);
+  gain.gain.linearRampToValueAtTime(0.5 * vol, time + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + sixteenth * 1.8);
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 500;
+  osc.connect(filter).connect(gain).connect(demoMasterGain);
+  osc.start(time);
+  osc.stop(time + sixteenth * 2);
+}
+
+function scheduleChord(time, sixteenth, vol) {
+  CHORD_NOTES.forEach(n => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freqFromSemitone(220, n), time);
+    gain.gain.setValueAtTime(0.001, time);
+    gain.gain.linearRampToValueAtTime(0.18 * vol, time + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + sixteenth * 6);
+    osc.connect(gain).connect(demoMasterGain);
+    osc.start(time);
+    osc.stop(time + sixteenth * 6.2);
+  });
+}
+
+let demoSectionIdx = 0;
+let demoBarInSection = 0;
+let demoStepInBar = 0;
+
+function currentSection() { return SECTIONS[demoSectionIdx]; }
+
+function advanceStep() {
+  demoStepInBar++;
+  if (demoStepInBar >= 16) {
+    demoStepInBar = 0;
+    demoBarInSection++;
+    if (demoBarInSection >= currentSection().bars) {
+      demoBarInSection = 0;
+      demoSectionIdx = (demoSectionIdx + 1) % SECTIONS.length;
+    }
+  }
+}
+
+function demoScheduler() {
+  while (demoNextStepTime < audioCtx.currentTime + LOOKAHEAD) {
+    const section = currentSection();
+    const sixteenth = 60 / section.bpm / 4;
+    const step = demoStepInBar;
+    const vol = section.volume;
+
+    if (section.kick[step]) scheduleKick(demoNextStepTime, vol);
+    if (section.snare[step]) scheduleSnare(demoNextStepTime, vol);
+    if (section.hat[step]) scheduleHat(demoNextStepTime, vol);
+    if (section.bass[step] !== null) scheduleBass(demoNextStepTime, section.bass[step], sixteenth, vol);
+    if (section.chordSteps.includes(step)) scheduleChord(demoNextStepTime, sixteenth, vol);
+
+    demoNextStepTime += sixteenth;
+    advanceStep();
+  }
+  demoTimerID = setTimeout(demoScheduler, 25);
+}
+
+async function startDemo() {
+  ensureAudioCtx();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  if (audioEl && !audioEl.paused) { audioEl.pause(); playBtn.textContent = '▶ เล่น'; }
+
+  demoMasterGain = audioCtx.createGain();
+  demoMasterGain.gain.value = 0.9;
+  demoMasterGain.connect(analyser);
+
+  demoSectionIdx = 0;
+  demoBarInSection = 0;
+  demoStepInBar = 0;
+  demoNextStepTime = audioCtx.currentTime + 0.05;
+  demoPlaying = true;
+  demoBtn.textContent = '⏸ หยุดเพลงตัวอย่าง';
+  trackName.textContent = 'เพลงตัวอย่าง (ช้า/เร็ว/เบรกดาวน์)';
+  markPlaybackStart();
+  demoScheduler();
+}
+
+function stopDemo() {
+  if (!demoPlaying) return;
+  demoPlaying = false;
+  clearTimeout(demoTimerID);
+  if (demoMasterGain) demoMasterGain.disconnect();
+  demoBtn.textContent = '▶ เล่นเพลงตัวอย่าง';
+  markPlaybackStop();
+}
+
+demoBtn.addEventListener('click', () => {
+  if (demoPlaying) stopDemo();
+  else startDemo();
+});
+
+// ---------- Particle system (center burst) ----------
+class Particle {
+  constructor() { this.reset(); }
+  reset() {
+    const angle = Math.random() * Math.PI * 2;
+    this.angle = angle;
+    this.radius = 40 + Math.random() * 20;
+    this.baseSpeed = 0.6 + Math.random() * 1.2;
+    this.speed = this.baseSpeed;
+    this.size = 1 + Math.random() * 2;
+    this.assignHue();
+    this.life = 1;
+    this.decay = 0.004 + Math.random() * 0.006;
+  }
+  assignHue() {
+    this.hue = (hueStart + Math.random() * hueRange) % 360;
+  }
+  update(energyBoost, speedMultiplier) {
+    this.speed = this.baseSpeed * speedMultiplier * (1 + energyBoost * 6);
+    this.radius += this.speed;
+    this.life -= this.decay * (1 + energyBoost * 2) * Math.max(speedMultiplier, 0.15);
+    if (this.life <= 0 || this.radius > Math.max(W, H) * 0.75) this.reset();
+  }
+  draw() {
+    const x = CX + Math.cos(this.angle) * this.radius;
+    const y = CY + Math.sin(this.angle) * this.radius;
+    ctx.beginPath();
+    ctx.arc(x, y, this.size, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${this.hue}, 90%, 65%, ${Math.max(this.life, 0)})`;
+    ctx.fill();
+  }
+}
+
+let particles = Array.from({ length: PARTICLE_COUNT }, () => new Particle());
+
+function setParticleCount(n) {
+  PARTICLE_COUNT = n;
+  if (particles.length < n) {
+    while (particles.length < n) particles.push(new Particle());
+  } else {
+    particles.length = n;
+  }
+}
+function recolorParticles() { particles.forEach(p => p.assignHue()); }
+
+// ---------- Floating glowing blobs preset ----------
+class Blob {
+  constructor() { this.reset(); }
+  reset() {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    const angle = Math.random() * Math.PI * 2;
+    this.baseSpeed = 0.3 + Math.random() * 0.7;
+    this.vx = Math.cos(angle);
+    this.vy = Math.sin(angle);
+    this.baseRadius = 12 + Math.random() * 22;
+    this.assignHue();
+    this.pulse = 0;
+  }
+  assignHue() {
+    this.hue = (blobHueStart + Math.random() * blobHueRange) % 360;
+  }
+  update(energyBoost, speedMultiplier, beatFlash) {
+    const speed = this.baseSpeed * speedMultiplier * (1 + energyBoost * 5);
+    this.x += this.vx * speed;
+    this.y += this.vy * speed;
+    if (this.x < 0 || this.x > W) { this.vx *= -1; this.x = Math.max(0, Math.min(W, this.x)); }
+    if (this.y < 0 || this.y > H) { this.vy *= -1; this.y = Math.max(0, Math.min(H, this.y)); }
+    this.pulse = beatFlash;
+  }
+  draw() {
+    const r = this.baseRadius * (1 + this.pulse * 0.9);
+    const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r * 2.4);
+    grad.addColorStop(0, `hsla(${this.hue}, 95%, 72%, ${0.85})`);
+    grad.addColorStop(0.4, `hsla(${this.hue}, 95%, 60%, 0.35)`);
+    grad.addColorStop(1, `hsla(${this.hue}, 95%, 50%, 0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, r * 2.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+let blobs = Array.from({ length: BLOB_COUNT }, () => new Blob());
+function setBlobCount(n) {
+  BLOB_COUNT = n;
+  if (blobs.length < n) {
+    while (blobs.length < n) blobs.push(new Blob());
+  } else {
+    blobs.length = n;
+  }
+}
+function recolorBlobs() { blobs.forEach(b => b.assignHue()); }
+
+// ---------- Beat detection ----------
+let bassHistory = [];
+const HISTORY_LEN = 30;
+let lastBeatTime = 0;
+
+function detectBeat(bassEnergy) {
+  bassHistory.push(bassEnergy);
+  if (bassHistory.length > HISTORY_LEN) bassHistory.shift();
+  const avg = bassHistory.reduce((a, b) => a + b, 0) / bassHistory.length;
+  const now = performance.now();
+  const isBeat = bassEnergy > avg * 1.35 && bassEnergy > 0.15 && (now - lastBeatTime) > 180;
+  if (isBeat) lastBeatTime = now;
+  return isBeat;
+}
+
+// ---------- Circular spectrum sampling / gap mask ----------
+const BAR_COUNT = 200;       // fixed resolution of the ring, independent of FFT bin count
+const HALF_BAR_COUNT = BAR_COUNT / 2;
+let gapMask = new Array(BAR_COUNT).fill(1);
+let lastMaskUpdate = 0;
+const MASK_UPDATE_INTERVAL = 550; // ms, how often the "broken" pattern reshuffles
+
+function regenerateGapMask() {
+  for (let i = 0; i < BAR_COUNT; i++) {
+    gapMask[i] = Math.random() < gapDensity ? (0.08 + Math.random() * 0.18) : 1;
+  }
+}
+
+function sampleFreqAt(fraction) {
+  if (!analyser) return 0.05 + Math.sin(fraction * 20 + Date.now() * 0.001) * 0.03;
+  const usableLen = Math.floor(freqData.length * 0.85);
+  const idx = Math.min(usableLen - 1, Math.floor(fraction * usableLen));
+  return freqData[idx] / 255;
+}
+
+function drawBar(angle, baseRadius, barLength, hue, value) {
+  const x1 = Math.cos(angle) * baseRadius;
+  const y1 = Math.sin(angle) * baseRadius;
+  const x2 = Math.cos(angle) * (baseRadius + barLength);
+  const y2 = Math.sin(angle) * (baseRadius + barLength);
+  ctx.strokeStyle = `hsla(${hue}, 95%, ${55 + value * 25}%, ${0.55 + value * 0.4})`;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+}
+
+// ---------- Floating waveform ribbon preset (reference: layered glowing wave) ----------
+const WAVE_LAYERS = 30;
+const WAVE_POINTS = 100;
+
+function drawWaveFlow(elapsed) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let L = 0; L < WAVE_LAYERS; L++) {
+    const layerT = L / (WAVE_LAYERS - 1);      // 0..1
+    const offsetFactor = (layerT - 0.5) * 2;   // -1..1
+    const dy = offsetFactor * Math.min(H, W) * 0.11;
+    const ampScale = 1 - Math.abs(offsetFactor) * 0.55;
+    const phase = layerT * 4.0 + elapsed * 0.0006;
+
+    ctx.beginPath();
+    for (let p = 0; p <= WAVE_POINTS; p++) {
+      const fraction = p / WAVE_POINTS;
+      const x = fraction * W;
+      const freqVal = sampleFreqAt(fraction);
+      const wobble = Math.sin(fraction * 10 + phase) * 0.15;
+      const amp = (freqVal * 0.75 + wobble) * ampScale * Math.min(H, W) * 0.26 * waveHeightScale;
+      const y = CY + dy + amp * Math.sin(fraction * Math.PI * 2 * 3 + phase * 2);
+      if (p === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    const hue = 210 + layerT * 110;
+    const alpha = 0.08 + (1 - Math.abs(offsetFactor)) * 0.32;
+    ctx.strokeStyle = `hsla(${hue}, 95%, 65%, ${alpha})`;
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---------- Render loop ----------
+let beatFlash = 0;
+let energySmooth = 0;
+const RAMP_DURATION = 5000; // ms — particles/blobs start slow, build up over this window
+
+function draw() {
+  requestAnimationFrame(draw);
+
+  ctx.fillStyle = 'rgba(5, 5, 10, 0.28)';
+  ctx.fillRect(0, 0, W, H);
+
+  let bassEnergy = 0, overallEnergy = 0;
+
+  if (analyser) {
+    analyser.getByteFrequencyData(freqData);
+
+    const bassEnd = Math.floor(freqData.length * 0.12);
+    for (let i = 0; i < bassEnd; i++) bassEnergy += freqData[i];
+    bassEnergy = bassEnergy / bassEnd / 255;
+
+    for (let i = 0; i < freqData.length; i++) overallEnergy += freqData[i];
+    overallEnergy = overallEnergy / freqData.length / 255;
+  }
+
+  energySmooth += (overallEnergy - energySmooth) * 0.15;
+
+  const isBeat = analyser ? detectBeat(bassEnergy) : false;
+  if (isBeat) beatFlash = 1;
+  beatFlash *= 0.9;
+
+  const now = performance.now();
+  if (now - lastMaskUpdate > MASK_UPDATE_INTERVAL) {
+    regenerateGapMask();
+    lastMaskUpdate = now;
+  }
+
+  // ---- Circular spectrum ----
+  if (circleEnabled) {
+    const baseRadius = Math.min(W, H) * 0.16 * (1 + beatFlash * 0.06);
+    ctx.save();
+    ctx.translate(CX, CY);
+
+    if (mirrorEnabled) {
+      for (let i = 0; i < HALF_BAR_COUNT; i++) {
+        const fraction = i / HALF_BAR_COUNT;
+        const value = sampleFreqAt(fraction);
+        const mask = gapMask[i];
+        const barLength = (6 + value * Math.min(W, H) * 0.22 * barHeightScale) * mask;
+        const angleStep = Math.PI / HALF_BAR_COUNT;
+        const angleRight = -Math.PI / 2 + i * angleStep;
+        const angleLeft = -Math.PI / 2 - i * angleStep;
+        const hue = 190 + fraction * 160;
+        drawBar(angleRight, baseRadius, barLength, hue, value);
+        drawBar(angleLeft, baseRadius, barLength, hue, value);
+      }
+    } else {
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const fraction = i / BAR_COUNT;
+        const value = sampleFreqAt(fraction);
+        const mask = gapMask[i];
+        const barLength = (6 + value * Math.min(W, H) * 0.22 * barHeightScale) * mask;
+        const angle = fraction * Math.PI * 2;
+        const hue = 190 + fraction * 160;
+        drawBar(angle, baseRadius, barLength, hue, value);
+      }
+    }
+    ctx.restore();
+
+    // ---- Center glow (part of the circular spectrum preset) ----
+    const glowR = baseRadius * (0.9 + beatFlash * 0.5);
+    const grad = ctx.createRadialGradient(CX, CY, 0, CX, CY, glowR);
+    grad.addColorStop(0, `rgba(180, 130, 255, ${0.25 + beatFlash * 0.35})`);
+    grad.addColorStop(1, 'rgba(180, 130, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(CX, CY, glowR, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ---- Floating waveform ribbon ----
+  if (waveEnabled) drawWaveFlow(now);
+
+  // ---- Particles & blobs: slow start, then build up clearly with the music ----
+  const rampProgress = playbackStartTime ? Math.min((now - playbackStartTime) / RAMP_DURATION, 1) : 0;
+  const speedMultiplier = 0.05 + 0.95 * rampProgress;
+  const energyBoost = (energySmooth * 0.6 + beatFlash * 0.8) * reactivity * rampProgress;
+
+  if (particlesEnabled) {
+    particles.forEach(p => { p.update(energyBoost, speedMultiplier); p.draw(); });
+  }
+  if (blobsEnabled) {
+    blobs.forEach(b => { b.update(energyBoost, speedMultiplier, beatFlash); b.draw(); });
+  }
+}
+
+draw();
+</script>
+</body>
+</html>
