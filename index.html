@@ -172,10 +172,32 @@
     <input type="range" id="waveHeight" min="0.3" max="2.5" step="0.1" value="1.0">
   </div>
 
+  <h4>แหล่งเสียง</h4>
+  <div class="row">
+    <label style="margin-bottom:6px;">เลือกอุปกรณ์เสียง (ไมค์ / sound device)</label>
+    <select id="deviceSelect" style="width:100%; padding:6px; border-radius:8px; background:rgba(255,255,255,0.08); color:#cfd3ff; border:1px solid rgba(150,160,255,0.2);">
+      <option value="">-- กดปุ่มด้านล่างเพื่อขอสิทธิ์เข้าถึง --</option>
+    </select>
+  </div>
+  <div class="row">
+    <button id="micPermBtn" style="width:100%; background:linear-gradient(135deg,#7b5cff,#ff5ccb); border:none; color:white; font-weight:600; padding:8px; border-radius:10px; cursor:pointer; font-size:12px;">🎤 เปิดสิทธิ์ / รีเฟรชรายการอุปกรณ์</button>
+  </div>
+  <div class="row" style="color:#7d84b8; font-size:11px; line-height:1.5;">
+    เลือก "Stereo Mix" หรือ virtual audio cable เพื่อจับเสียงที่กำลังเล่นจากเครื่อง หรือเลือกไมค์เพื่อจับเสียงรอบข้าง (ต้องเปิดผ่าน HTTPS หรือ localhost)
+  </div>
+
   <h4>ก้อนลอยเรืองแสง</h4>
   <div class="row">
     <label>จำนวนก้อน <span class="val" id="blobCountVal">22</span></label>
     <input type="range" id="blobCount" min="4" max="60" step="1" value="22">
+  </div>
+  <div class="row">
+    <label>ขนาดเล็กสุด <span class="val" id="blobMinSizeVal">12px</span></label>
+    <input type="range" id="blobMinSize" min="4" max="60" step="1" value="12">
+  </div>
+  <div class="row">
+    <label>ขนาดใหญ่สุด <span class="val" id="blobMaxSizeVal">34px</span></label>
+    <input type="range" id="blobMaxSize" min="8" max="120" step="1" value="34">
   </div>
   <div class="row">
     <label>สีเริ่มต้น (Hue) <span class="val" id="blobHueStartVal">300°</span></label>
@@ -252,6 +274,8 @@ let waveHeightScale = 1.0;
 let BLOB_COUNT = 22;
 let blobHueStart = 300;
 let blobHueRange = 80;
+let blobMinSize = 12;
+let blobMaxSize = 34;
 
 function bindSlider(id, valId, formatter, onChange) {
   const el = document.getElementById(id);
@@ -271,6 +295,8 @@ bindSlider('barHeight', 'barHeightVal', v => v.toFixed(1) + 'x', v => { barHeigh
 bindSlider('gapDensity', 'gapVal', v => Math.round(v) + '%', v => { gapDensity = v / 100; });
 bindSlider('waveHeight', 'waveHeightVal', v => v.toFixed(1) + 'x', v => { waveHeightScale = v; });
 bindSlider('blobCount', 'blobCountVal', v => Math.round(v), v => setBlobCount(Math.round(v)));
+bindSlider('blobMinSize', 'blobMinSizeVal', v => Math.round(v) + 'px', v => { blobMinSize = Math.min(v, blobMaxSize); resizeBlobs(); });
+bindSlider('blobMaxSize', 'blobMaxSizeVal', v => Math.round(v) + 'px', v => { blobMaxSize = Math.max(v, blobMinSize); resizeBlobs(); });
 bindSlider('blobHueStart', 'blobHueStartVal', v => Math.round(v) + '°', v => { blobHueStart = v; recolorBlobs(); });
 bindSlider('blobHueRange', 'blobHueRangeVal', v => Math.round(v) + '°', v => { blobHueRange = v; recolorBlobs(); });
 document.getElementById('mirrorToggle').addEventListener('change', (e) => { mirrorEnabled = e.target.checked; });
@@ -288,6 +314,67 @@ const FFT_SIZE = 512;
 let playbackStartTime = null;
 function markPlaybackStart() { playbackStartTime = performance.now(); }
 function markPlaybackStop() { playbackStartTime = null; }
+
+// ---------- Sound device (mic / system input) selection ----------
+let micStream = null, micSource = null;
+const deviceSelect = document.getElementById('deviceSelect');
+const micPermBtn = document.getElementById('micPermBtn');
+
+function stopMic() {
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  if (micSource) { micSource.disconnect(); micSource = null; }
+}
+
+async function refreshDeviceList(selectDeviceId) {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const audioInputs = devices.filter(d => d.kind === 'audioinput');
+    deviceSelect.innerHTML = '';
+    if (audioInputs.length === 0) {
+      deviceSelect.innerHTML = '<option value="">ไม่พบอุปกรณ์เสียง</option>';
+      return;
+    }
+    audioInputs.forEach((d, i) => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = d.label || `อุปกรณ์เสียง ${i + 1}`;
+      deviceSelect.appendChild(opt);
+    });
+    if (selectDeviceId) deviceSelect.value = selectDeviceId;
+  } catch (err) {
+    console.error('refreshDeviceList error', err);
+  }
+}
+
+async function connectDevice(deviceId) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert('เบราว์เซอร์นี้ไม่รองรับการเลือกอุปกรณ์เสียง หรือหน้านี้ไม่ได้เปิดผ่าน HTTPS/localhost');
+    return;
+  }
+  try {
+    ensureAudioCtx();
+    stopDemo();
+    if (audioEl && !audioEl.paused) { audioEl.pause(); playBtn.textContent = '▶ เล่น'; }
+    stopMic();
+    const constraints = deviceId ? { audio: { deviceId: { exact: deviceId } } } : { audio: true };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    micStream = stream;
+    micSource = audioCtx.createMediaStreamSource(stream);
+    micSource.connect(analyser);
+    trackName.textContent = 'อุปกรณ์เสียง (live)';
+    markPlaybackStart();
+    await refreshDeviceList(deviceId);
+  } catch (err) {
+    alert('ไม่สามารถเข้าถึงอุปกรณ์เสียงได้: ' + err.message);
+  }
+}
+
+micPermBtn.addEventListener('click', () => connectDevice(deviceSelect.value || undefined));
+deviceSelect.addEventListener('change', () => connectDevice(deviceSelect.value));
+if (navigator.mediaDevices) {
+  navigator.mediaDevices.addEventListener?.('devicechange', () => refreshDeviceList());
+}
 
 fileInput.addEventListener('change', (e) => {
   const file = e.target.files[0];
@@ -316,6 +403,7 @@ fileInput.addEventListener('change', (e) => {
 playBtn.addEventListener('click', async () => {
   if (!audioEl) return;
   stopDemo();
+  stopMic();
   if (audioCtx.state === 'suspended') await audioCtx.resume();
   if (audioEl.paused) {
     audioEl.play();
@@ -498,6 +586,7 @@ async function startDemo() {
   ensureAudioCtx();
   if (audioCtx.state === 'suspended') await audioCtx.resume();
   if (audioEl && !audioEl.paused) { audioEl.pause(); playBtn.textContent = '▶ เล่น'; }
+  stopMic();
 
   demoMasterGain = audioCtx.createGain();
   demoMasterGain.gain.value = 0.9;
@@ -583,7 +672,7 @@ class Blob {
     this.baseSpeed = 0.3 + Math.random() * 0.7;
     this.vx = Math.cos(angle);
     this.vy = Math.sin(angle);
-    this.baseRadius = 12 + Math.random() * 22;
+    this.baseRadius = blobMinSize + Math.random() * (blobMaxSize - blobMinSize);
     this.assignHue();
     this.pulse = 0;
   }
@@ -621,6 +710,7 @@ function setBlobCount(n) {
   }
 }
 function recolorBlobs() { blobs.forEach(b => b.assignHue()); }
+function resizeBlobs() { blobs.forEach(b => { b.baseRadius = blobMinSize + Math.random() * (blobMaxSize - blobMinSize); }); }
 
 // ---------- Beat detection ----------
 let bassHistory = [];
