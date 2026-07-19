@@ -17,10 +17,20 @@ Canvas 2D, and the Web Audio API. No build step, no dependencies — just open
   - Circular spectrum ring (mirror/symmetry, bar height, and "gap" density
     all adjustable)
   - Center-burst particles (slow ramp-up on playback start, count, color,
-    beat reactivity adjustable)
+    beat reactivity, and how far they spread all adjustable — each beat
+    fires them outward)
   - Floating waveform ribbon (layered glowing wave, height adjustable)
-  - Glowing floating blobs (count, min/max size, color range, bounce +
-    pulse on beat)
+  - Glowing floating blobs (count, min/max size, color range; additively
+    blended so overlaps brighten instead of leaving dark rings, and they
+    veer + lunge on every beat)
+
+- **Beat reaction** (shared by particles + blobs)
+  - Choose which frequency band drives the reaction: bass (kick/sub),
+    mids (snare/body), treble (hats/air), full spectrum, or a **custom
+    range** you set with two sliders
+  - Adjustable beat sensitivity — the detector uses an adaptive
+    average+variance threshold so it keeps finding beats on fast, busy
+    tracks instead of going still
 
 - **Background**
   - Upload a custom image or video as the backdrop (auto "cover" fit,

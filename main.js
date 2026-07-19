@@ -41,6 +41,7 @@ bindSlider('particleCount', 'particleCountVal', v => Math.round(v), v => setPart
 bindSlider('hueStart', 'hueStartVal', v => Math.round(v) + '°', v => { hueStart = v; recolorParticles(); });
 bindSlider('hueRange', 'hueRangeVal', v => Math.round(v) + '°', v => { hueRange = v; recolorParticles(); });
 bindSlider('reactivity', 'reactivityVal', v => v.toFixed(1) + 'x', v => { reactivity = v; });
+bindSlider('particleSpread', 'particleSpreadVal', v => v.toFixed(1) + 'x', v => { particleSpread = v; });
 bindSlider('barHeight', 'barHeightVal', v => v.toFixed(1) + 'x', v => { barHeightScale = v; });
 bindSlider('gapDensity', 'gapVal', v => Math.round(v) + '%', v => { gapDensity = v / 100; });
 bindSlider('waveHeight', 'waveHeightVal', v => v.toFixed(1) + 'x', v => { waveHeightScale = v; });
@@ -93,6 +94,41 @@ bindSlider('blobMaxSize', 'blobMaxSizeVal', v => Math.round(v) + 'px', v => { bl
 bindSlider('blobHueStart', 'blobHueStartVal', v => Math.round(v) + '°', v => { blobHueStart = v; recolorBlobs(); });
 bindSlider('blobHueRange', 'blobHueRangeVal', v => Math.round(v) + '°', v => { blobHueRange = v; recolorBlobs(); });
 document.getElementById('mirrorToggle').addEventListener('change', (e) => { mirrorEnabled = e.target.checked; });
+
+// ---------- Beat reaction: frequency-band source + custom range + sensitivity ----------
+const bandSourceSel = document.getElementById('bandSource');
+const bandLowRow = document.getElementById('bandLowRow');
+const bandHighRow = document.getElementById('bandHighRow');
+const bandLowSlider = document.getElementById('bandLow');
+const bandHighSlider = document.getElementById('bandHigh');
+
+function applyBandFromSlidersOrPreset() {
+  if (bandSource === 'custom') {
+    // keep low < high so the band is always valid
+    let lo = parseInt(bandLowSlider.value, 10);
+    let hi = parseInt(bandHighSlider.value, 10);
+    if (lo >= hi) { lo = Math.min(lo, hi - 1); bandLowSlider.value = lo; }
+    bandLow = lo / 100;
+    bandHigh = hi / 100;
+  } else {
+    const preset = BAND_PRESETS[bandSource] || BAND_PRESETS.bass;
+    bandLow = preset[0];
+    bandHigh = preset[1];
+  }
+  bandHistory = [];   // forget old averages so the new band re-baselines cleanly
+}
+
+bandSourceSel.addEventListener('change', () => {
+  bandSource = bandSourceSel.value;
+  const custom = bandSource === 'custom';
+  bandLowRow.style.display = custom ? '' : 'none';
+  bandHighRow.style.display = custom ? '' : 'none';
+  applyBandFromSlidersOrPreset();
+});
+
+bindSlider('bandLow', 'bandLowVal', v => Math.round(v) + '%', () => applyBandFromSlidersOrPreset());
+bindSlider('bandHigh', 'bandHighVal', v => Math.round(v) + '%', () => applyBandFromSlidersOrPreset());
+bindSlider('beatSens', 'beatSensVal', v => v.toFixed(2), v => { beatSensitivity = v; });
 
 // ---------- Initial language render (English default) ----------
 applyStaticTranslations();

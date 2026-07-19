@@ -14,6 +14,7 @@ let PARTICLE_COUNT = 260;
 let hueStart = 260;
 let hueRange = 100;
 let reactivity = 1.0;
+let particleSpread = 1.6;   // how far particles travel before recycling
 let barHeightScale = 1.0;
 let mirrorEnabled = true;
 let gapDensity = 0.35;
@@ -27,6 +28,21 @@ let blobHueStart = 300;
 let blobHueRange = 80;
 let blobMinSize = 12;
 let blobMaxSize = 34;
+
+// ---------- Beat / frequency-band reactivity ----------
+// The visuals react to one slice of the spectrum. Presets name the slice after
+// the instrument that usually lives there; 'custom' lets the user dial it in.
+const BAND_PRESETS = {
+  bass:   [0.00, 0.12],   // kick / sub
+  mid:    [0.12, 0.45],   // snare / body
+  treble: [0.45, 0.90],   // hats / air
+  full:   [0.00, 1.00],
+};
+let bandSource = 'bass';
+let bandLow = 0.00;
+let bandHigh = 0.12;
+let beatSensitivity = 1.30;   // how far above the running average counts as a beat
+let beatMinInterval = 110;    // ms — lower lets fast tracks retrigger
 
 // ---------- Preset visibility toggles ----------
 let circleEnabled = true;
@@ -51,27 +67,33 @@ class Particle {
     const angle = Math.random() * Math.PI * 2;
     this.angle = angle;
     this.radius = 40 + Math.random() * 20;
-    this.baseSpeed = 0.6 + Math.random() * 1.2;
+    this.baseSpeed = 0.8 + Math.random() * 1.6;
     this.speed = this.baseSpeed;
     this.size = 1 + Math.random() * 2;
     this.assignHue();
     this.life = 1;
-    this.decay = 0.004 + Math.random() * 0.006;
+    // baseDecay is divided by particleSpread at update time, so raising the
+    // spread slider keeps particles alive long enough to actually get there
+    this.baseDecay = 0.0025 + Math.random() * 0.0045;
+    this.impulse = 0;
   }
   assignHue() {
     this.hue = (hueStart + Math.random() * hueRange) % 360;
   }
-  update(energyBoost, speedMultiplier) {
-    this.speed = this.baseSpeed * speedMultiplier * (1 + energyBoost * 6);
+  update(energyBoost, speedMultiplier, beatImpulse) {
+    // each beat slams the particle outward, then the kick bleeds off
+    this.impulse = Math.max(this.impulse * 0.90, beatImpulse);
+    this.speed = this.baseSpeed * speedMultiplier * (1 + energyBoost * 10 + this.impulse * 9);
     this.radius += this.speed;
-    this.life -= this.decay * (1 + energyBoost * 2) * Math.max(speedMultiplier, 0.15);
-    if (this.life <= 0 || this.radius > Math.max(W, H) * 0.75) this.reset();
+    const decay = this.baseDecay / particleSpread;
+    this.life -= decay * (1 + energyBoost * 2) * Math.max(speedMultiplier, 0.15);
+    if (this.life <= 0 || this.radius > Math.max(W, H) * 0.75 * particleSpread) this.reset();
   }
   draw() {
     const x = CX + Math.cos(this.angle) * this.radius;
     const y = CY + Math.sin(this.angle) * this.radius;
     ctx.beginPath();
-    ctx.arc(x, y, this.size, 0, Math.PI * 2);
+    ctx.arc(x, y, this.size * (1 + this.impulse * 0.6), 0, Math.PI * 2);
     ctx.fillStyle = `hsla(${this.hue}, 90%, 65%, ${Math.max(this.life, 0)})`;
     ctx.fill();
   }
@@ -102,27 +124,48 @@ class Blob {
     this.baseRadius = blobMinSize + Math.random() * (blobMaxSize - blobMinSize);
     this.assignHue();
     this.pulse = 0;
+    this.burst = 0;
   }
   assignHue() {
     this.hue = (blobHueStart + Math.random() * blobHueRange) % 360;
   }
-  update(energyBoost, speedMultiplier, beatFlash) {
-    const speed = this.baseSpeed * speedMultiplier * (1 + energyBoost * 5);
+  update(energyBoost, speedMultiplier, beatFlash, isBeat) {
+    // On every detected beat the blob veers and lunges, so even on fast tracks
+    // (where the smoothed energy barely moves) the motion still reads clearly.
+    if (isBeat) {
+      const a = Math.atan2(this.vy, this.vx) + (Math.random() - 0.5) * 0.9;
+      this.vx = Math.cos(a);
+      this.vy = Math.sin(a);
+      this.burst = 1;
+    }
+    this.burst *= 0.90;
+    const speed = this.baseSpeed * speedMultiplier * (1 + energyBoost * 6 + this.burst * 6);
     this.x += this.vx * speed;
     this.y += this.vy * speed;
     if (this.x < 0 || this.x > W) { this.vx *= -1; this.x = Math.max(0, Math.min(W, this.x)); }
     if (this.y < 0 || this.y > H) { this.vy *= -1; this.y = Math.max(0, Math.min(H, this.y)); }
-    this.pulse = beatFlash;
+    this.pulse = Math.max(beatFlash, this.burst);
   }
   draw() {
     const r = this.baseRadius * (1 + this.pulse * 0.9);
-    const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r * 2.4);
-    grad.addColorStop(0, `hsla(${this.hue}, 95%, 72%, ${0.85})`);
-    grad.addColorStop(0.4, `hsla(${this.hue}, 95%, 60%, 0.35)`);
-    grad.addColorStop(1, `hsla(${this.hue}, 95%, 50%, 0)`);
+    const R = r * 2.6;
+    const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, R);
+    // Additive blending (set by drawBlobs) means alphas stack, so these stay low
+    // and the outer stop fades to a fully transparent version of the SAME hue —
+    // never toward black, which is what used to leave dark rings on overlap.
+    grad.addColorStop(0,    `hsla(${this.hue}, 100%, 82%, 0.55)`);
+    grad.addColorStop(0.16, `hsla(${this.hue}, 96%, 66%, 0.30)`);
+    grad.addColorStop(0.45, `hsla(${this.hue}, 95%, 58%, 0.10)`);
+    grad.addColorStop(1,    `hsla(${this.hue}, 95%, 55%, 0)`);
     ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.arc(this.x, this.y, r * 2.4, 0, Math.PI * 2);
+    ctx.arc(this.x, this.y, R, 0, Math.PI * 2);
+    ctx.fill();
+
+    // tight bright core for a bit of sparkle
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, r * 0.32, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${this.hue}, 100%, 90%, ${0.28 + this.pulse * 0.35})`;
     ctx.fill();
   }
 }
@@ -139,17 +182,39 @@ function setBlobCount(n) {
 function recolorBlobs() { blobs.forEach(b => b.assignHue()); }
 function resizeBlobs() { blobs.forEach(b => { b.baseRadius = blobMinSize + Math.random() * (blobMaxSize - blobMinSize); }); }
 
+function drawBlobs(energyBoost, speedMultiplier, beatFlash, isBeat) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  blobs.forEach(b => { b.update(energyBoost, speedMultiplier, beatFlash, isBeat); b.draw(); });
+  ctx.restore();
+}
+
 // ---------- Beat detection ----------
-let bassHistory = [];
-const HISTORY_LEN = 30;
+let bandHistory = [];
+const HISTORY_LEN = 43;   // ~0.7s at 60fps
 let lastBeatTime = 0;
 
-function detectBeat(bassEnergy) {
-  bassHistory.push(bassEnergy);
-  if (bassHistory.length > HISTORY_LEN) bassHistory.shift();
-  const avg = bassHistory.reduce((a, b) => a + b, 0) / bassHistory.length;
+// Average energy across the currently selected slice of the spectrum.
+function bandEnergy(lowFrac, highFrac) {
+  if (!analyser) return 0;
+  const n = freqData.length;
+  const start = Math.max(0, Math.floor(n * lowFrac));
+  const end = Math.max(start + 1, Math.min(n, Math.floor(n * highFrac)));
+  let sum = 0;
+  for (let i = start; i < end; i++) sum += freqData[i];
+  return sum / (end - start) / 255;
+}
+
+function detectBeat(energy) {
+  bandHistory.push(energy);
+  if (bandHistory.length > HISTORY_LEN) bandHistory.shift();
+  const avg = bandHistory.reduce((a, b) => a + b, 0) / bandHistory.length;
+  // Variance term: on busy/loud passages the average alone stops discriminating,
+  // so require the peak to also stand out from the recent spread.
+  const variance = bandHistory.reduce((a, b) => a + (b - avg) * (b - avg), 0) / bandHistory.length;
+  const threshold = avg * beatSensitivity + Math.sqrt(variance) * 0.4;
   const now = performance.now();
-  const isBeat = bassEnergy > avg * 1.35 && bassEnergy > 0.15 && (now - lastBeatTime) > 180;
+  const isBeat = energy > threshold && energy > 0.08 && (now - lastBeatTime) > beatMinInterval;
   if (isBeat) lastBeatTime = now;
   return isBeat;
 }
@@ -239,6 +304,7 @@ function drawWaveFlow(elapsed) {
 
 // ---------- Render loop ----------
 let beatFlash = 0;
+let beatImpulse = 0;
 let energySmooth = 0;
 const RAMP_DURATION = 5000; // ms — particles/blobs start slow, build up over this window
 
@@ -254,24 +320,19 @@ function draw() {
     ctx.fillRect(0, 0, W, H);
   }
 
-  let bassEnergy = 0, overallEnergy = 0;
+  let selectedEnergy = 0;
 
   if (analyser) {
     analyser.getByteFrequencyData(freqData);
-
-    const bassEnd = Math.floor(freqData.length * 0.12);
-    for (let i = 0; i < bassEnd; i++) bassEnergy += freqData[i];
-    bassEnergy = bassEnergy / bassEnd / 255;
-
-    for (let i = 0; i < freqData.length; i++) overallEnergy += freqData[i];
-    overallEnergy = overallEnergy / freqData.length / 255;
+    selectedEnergy = bandEnergy(bandLow, bandHigh);
   }
 
-  energySmooth += (overallEnergy - energySmooth) * 0.15;
+  energySmooth += (selectedEnergy - energySmooth) * 0.15;
 
-  const isBeat = analyser ? detectBeat(bassEnergy) : false;
-  if (isBeat) beatFlash = 1;
-  beatFlash *= 0.9;
+  const isBeat = analyser ? detectBeat(selectedEnergy) : false;
+  if (isBeat) { beatFlash = 1; beatImpulse = 1; }
+  beatFlash *= 0.88;
+  beatImpulse *= 0.85;
 
   const now = performance.now();
   if (now - lastMaskUpdate > MASK_UPDATE_INTERVAL) {
@@ -329,11 +390,12 @@ function draw() {
   const rampProgress = playbackStartTime ? Math.min((now - playbackStartTime) / RAMP_DURATION, 1) : 0;
   const speedMultiplier = 0.05 + 0.95 * rampProgress;
   const energyBoost = (energySmooth * 0.6 + beatFlash * 0.8) * reactivity * rampProgress;
+  const impulse = beatImpulse * reactivity * rampProgress;
 
   if (particlesEnabled) {
-    particles.forEach(p => { p.update(energyBoost, speedMultiplier); p.draw(); });
+    particles.forEach(p => { p.update(energyBoost, speedMultiplier, impulse); p.draw(); });
   }
   if (blobsEnabled) {
-    blobs.forEach(b => { b.update(energyBoost, speedMultiplier, beatFlash); b.draw(); });
+    drawBlobs(energyBoost, speedMultiplier, beatFlash, isBeat && rampProgress > 0);
   }
 }
