@@ -134,6 +134,19 @@
     <label for="toggleBlobs">ก้อนลอยเรืองแสง</label>
   </div>
 
+  <h4>พื้นหลัง</h4>
+  <div class="row">
+    <label for="bgFileInput" style="display:block; text-align:center; background:rgba(255,255,255,0.08); padding:8px; border-radius:10px; cursor:pointer; margin-bottom:0;">🖼️🎬 อัปโหลดรูป/วิดีโอพื้นหลัง</label>
+    <input type="file" id="bgFileInput" accept="image/*,video/*" style="display:none;">
+  </div>
+  <div class="row">
+    <button id="bgRemoveBtn" style="width:100%; background:rgba(255,255,255,0.08); border:1px solid rgba(150,160,255,0.2); color:#cfd3ff; padding:8px; border-radius:10px; cursor:pointer; font-size:12px;" disabled>ลบพื้นหลัง (กลับเป็นสีดำ)</button>
+  </div>
+  <div class="row">
+    <label>ความมืดพื้นหลัง <span class="val" id="bgDimVal">35%</span></label>
+    <input type="range" id="bgDim" min="0" max="90" step="5" value="35">
+  </div>
+
   <h4>Particles</h4>
   <div class="row">
     <label>จำนวน particle <span class="val" id="particleCountVal">260</span></label>
@@ -271,6 +284,10 @@ let barHeightScale = 1.0;
 let mirrorEnabled = true;
 let gapDensity = 0.35;
 let waveHeightScale = 1.0;
+let bgMedia = null;       // HTMLImageElement or HTMLVideoElement
+let bgMediaType = null;   // 'image' | 'video'
+let bgObjectUrl = null;
+let bgDim = 0.35;
 let BLOB_COUNT = 22;
 let blobHueStart = 300;
 let blobHueRange = 80;
@@ -294,6 +311,58 @@ bindSlider('reactivity', 'reactivityVal', v => v.toFixed(1) + 'x', v => { reacti
 bindSlider('barHeight', 'barHeightVal', v => v.toFixed(1) + 'x', v => { barHeightScale = v; });
 bindSlider('gapDensity', 'gapVal', v => Math.round(v) + '%', v => { gapDensity = v / 100; });
 bindSlider('waveHeight', 'waveHeightVal', v => v.toFixed(1) + 'x', v => { waveHeightScale = v; });
+bindSlider('bgDim', 'bgDimVal', v => Math.round(v) + '%', v => { bgDim = v / 100; });
+
+const bgFileInput = document.getElementById('bgFileInput');
+const bgRemoveBtn = document.getElementById('bgRemoveBtn');
+
+function clearBackground() {
+  if (bgMediaType === 'video' && bgMedia) {
+    bgMedia.pause();
+    bgMedia.src = '';
+  }
+  if (bgObjectUrl) { URL.revokeObjectURL(bgObjectUrl); bgObjectUrl = null; }
+  bgMedia = null;
+  bgMediaType = null;
+}
+
+bgFileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  clearBackground();
+  const url = URL.createObjectURL(file);
+  bgObjectUrl = url;
+
+  if (file.type.startsWith('video/')) {
+    const vid = document.createElement('video');
+    vid.src = url;
+    vid.loop = true;
+    vid.muted = true;
+    vid.playsInline = true;
+    vid.autoplay = true;
+    vid.addEventListener('loadeddata', () => {
+      bgMedia = vid;
+      bgMediaType = 'video';
+      bgRemoveBtn.disabled = false;
+    });
+    vid.play().catch(() => {});
+  } else if (file.type.startsWith('image/')) {
+    const img = new Image();
+    img.onload = () => {
+      bgMedia = img;
+      bgMediaType = 'image';
+      bgRemoveBtn.disabled = false;
+    };
+    img.src = url;
+  } else {
+    alert('รองรับเฉพาะไฟล์รูปภาพหรือวิดีโอ');
+  }
+});
+bgRemoveBtn.addEventListener('click', () => {
+  clearBackground();
+  bgRemoveBtn.disabled = true;
+  bgFileInput.value = '';
+});
 bindSlider('blobCount', 'blobCountVal', v => Math.round(v), v => setBlobCount(Math.round(v)));
 bindSlider('blobMinSize', 'blobMinSizeVal', v => Math.round(v) + 'px', v => { blobMinSize = Math.min(v, blobMaxSize); resizeBlobs(); });
 bindSlider('blobMaxSize', 'blobMaxSizeVal', v => Math.round(v) + 'px', v => { blobMaxSize = Math.max(v, blobMinSize); resizeBlobs(); });
@@ -747,6 +816,23 @@ function sampleFreqAt(fraction) {
   return freqData[idx] / 255;
 }
 
+function drawMediaCover(media) {
+  const mw = media.videoWidth || media.naturalWidth;
+  const mh = media.videoHeight || media.naturalHeight;
+  if (!mw || !mh) return;
+  const canvasRatio = W / H;
+  const mediaRatio = mw / mh;
+  let sx = 0, sy = 0, sw = mw, sh = mh;
+  if (mediaRatio > canvasRatio) {
+    sw = mh * canvasRatio;
+    sx = (mw - sw) / 2;
+  } else {
+    sh = mw / canvasRatio;
+    sy = (mh - sh) / 2;
+  }
+  ctx.drawImage(media, sx, sy, sw, sh, 0, 0, W, H);
+}
+
 function drawBar(angle, baseRadius, barLength, hue, value) {
   const x1 = Math.cos(angle) * baseRadius;
   const y1 = Math.sin(angle) * baseRadius;
@@ -801,8 +887,14 @@ const RAMP_DURATION = 5000; // ms — particles/blobs start slow, build up over 
 function draw() {
   requestAnimationFrame(draw);
 
-  ctx.fillStyle = 'rgba(5, 5, 10, 0.28)';
-  ctx.fillRect(0, 0, W, H);
+  if (bgMedia) {
+    drawMediaCover(bgMedia);
+    ctx.fillStyle = `rgba(5, 5, 10, ${bgDim})`;
+    ctx.fillRect(0, 0, W, H);
+  } else {
+    ctx.fillStyle = 'rgba(5, 5, 10, 0.28)';
+    ctx.fillRect(0, 0, W, H);
+  }
 
   let bassEnergy = 0, overallEnergy = 0;
 
